@@ -45,6 +45,8 @@ let isSpeechLoading = false;
 let isSentenceHidden = false;
 const translationCache = new Map();
 let activeTranslationTooltip;
+let draggedWordIndex;
+let draggedWordSource;
 
 function playFeedbackSound(type) {
   const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -180,6 +182,7 @@ function setupChallenge() {
     : "Thêm câu ở phía trên để bắt đầu bài tập.";
   challengeFeedback.textContent = "";
   challengeFeedback.className = "challenge-feedback";
+  preloadTranslations();
   renderChallenge();
 }
 
@@ -196,26 +199,101 @@ function renderChallenge() {
     button.className = `word-button${selectedWords.includes(item.index) ? " used" : ""}`;
     button.textContent = item.word;
     button.disabled = selectedWords.includes(item.index);
+    button.draggable = !button.disabled;
     button.addEventListener("click", () => selectWord(item.index));
+    button.addEventListener("dragstart", (event) => {
+      draggedWordIndex = item.index;
+      draggedWordSource = "bank";
+      event.dataTransfer.effectAllowed = "move";
+      button.classList.add("is-dragging");
+    });
+    button.addEventListener("dragend", () => {
+      button.classList.remove("is-dragging");
+      clearAnswerDropGaps();
+    });
     addTranslationTooltip(button, item.word);
     wordBank.append(button);
   });
-  selectedWords.forEach((wordIndex) => {
+  selectedWords.forEach((wordIndex, position) => {
+    answerZone.append(createAnswerDropGap(position));
     const button = document.createElement("button");
     button.type = "button";
     button.className = "answer-word";
     button.textContent = challengeWords[wordIndex].word;
     button.title = "Bấm để bỏ từ này khỏi đáp án";
+    button.draggable = true;
     button.addEventListener("click", () => removeWord(wordIndex));
+    button.addEventListener("dragstart", (event) => {
+      draggedWordIndex = wordIndex;
+      draggedWordSource = "answer";
+      event.dataTransfer.effectAllowed = "move";
+      button.classList.add("is-dragging");
+    });
+    button.addEventListener("dragend", () => {
+      button.classList.remove("is-dragging");
+      clearAnswerDropGaps();
+    });
+    button.addEventListener("dragover", (event) => event.preventDefault());
+    button.addEventListener("drop", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      moveWordToPosition(selectedWords.indexOf(wordIndex));
+    });
     addTranslationTooltip(button, challengeWords[wordIndex].word);
     answerZone.append(button);
   });
+  if (selectedWords.length) {
+    answerZone.append(createAnswerDropGap(selectedWords.length));
+  }
   if (!selectedWords.length && challengeWords.length) {
     answerZone.innerHTML =
       '<span class="answer-placeholder">Các từ bạn chọn sẽ xuất hiện ở đây</span>';
   }
   checkButton.disabled =
     !challengeWords.length || selectedWords.length !== challengeWords.length;
+}
+
+function clearAnswerDropGaps() {
+  answerZone
+    .querySelectorAll(".answer-drop-gap")
+    .forEach((dropGap) => dropGap.classList.remove("is-active"));
+}
+
+function createAnswerDropGap(position) {
+  const dropGap = document.createElement("span");
+  dropGap.className = "answer-drop-gap";
+  dropGap.setAttribute("aria-hidden", "true");
+  dropGap.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    clearAnswerDropGaps();
+    dropGap.classList.add("is-active");
+  });
+  dropGap.addEventListener("drop", (event) => {
+    event.preventDefault();
+    moveWordToPosition(position);
+  });
+  return dropGap;
+}
+
+async function loadTranslation(word) {
+  const normalizedWord = word.replace(/[.,!?;:()[\]{}"']/g, "").trim();
+  if (!normalizedWord || translationCache.has(normalizedWord)) return;
+  try {
+    const response = await fetch(
+      `/api/translate?q=${encodeURIComponent(normalizedWord)}`,
+    );
+    if (!response.ok) throw new Error("Translation request failed");
+    const { translatedText } = await response.json();
+    if (!translatedText) throw new Error("Empty translation");
+    translationCache.set(normalizedWord, translatedText);
+  } catch {
+    translationCache.set(normalizedWord, "Chưa lấy được nghĩa");
+  }
+}
+
+async function preloadTranslations() {
+  const words = [...new Set(challengeWords.map((item) => item.word))];
+  for (const word of words) await loadTranslation(word);
 }
 
 function addTranslationTooltip(button, word) {
@@ -240,15 +318,8 @@ async function showTranslation(button, word) {
   activeTranslationTooltip = tooltip;
 
   try {
-    let translatedText = translationCache.get(word);
-    if (!translatedText) {
-      const response = await fetch(
-        `/api/translate?q=${encodeURIComponent(word)}`,
-      );
-      if (!response.ok) throw new Error("Translation request failed");
-      ({ translatedText } = await response.json());
-      translationCache.set(word, translatedText);
-    }
+    await loadTranslation(word);
+    const translatedText = translationCache.get(word);
     if (activeTranslationTooltip === tooltip)
       tooltip.textContent = translatedText;
   } catch {
@@ -281,6 +352,26 @@ function selectWord(wordIndex) {
 
 function removeWord(wordIndex) {
   selectedWords = selectedWords.filter((index) => index !== wordIndex);
+  playFeedbackSound("click");
+  renderChallenge();
+}
+
+function moveWordToPosition(insertionPosition) {
+  if (draggedWordIndex === undefined) return;
+  if (draggedWordSource === "bank") {
+    if (selectedWords.includes(draggedWordIndex)) return;
+    selectedWords.splice(insertionPosition, 0, draggedWordIndex);
+  } else {
+    const sourcePosition = selectedWords.indexOf(draggedWordIndex);
+    if (sourcePosition < 0) return;
+    selectedWords.splice(sourcePosition, 1);
+    if (sourcePosition < insertionPosition) insertionPosition -= 1;
+    selectedWords.splice(insertionPosition, 0, draggedWordIndex);
+  }
+  draggedWordIndex = undefined;
+  draggedWordSource = undefined;
+  challengeFeedback.textContent = "";
+  challengeFeedback.className = "challenge-feedback";
   playFeedbackSound("click");
   renderChallenge();
 }
@@ -520,6 +611,24 @@ playButton.addEventListener("click", () => {
 });
 nextButton.addEventListener("click", () => chooseRandomSentence(true));
 checkButton.addEventListener("click", checkChallenge);
+answerZone.addEventListener("dragover", (event) => {
+  event.preventDefault();
+  answerZone.classList.add("drag-over");
+});
+answerZone.addEventListener("dragleave", () => {
+  answerZone.classList.remove("drag-over");
+});
+answerZone.addEventListener("drop", (event) => {
+  event.preventDefault();
+  answerZone.classList.remove("drag-over");
+  if (draggedWordSource === "bank" && draggedWordIndex !== undefined) {
+    selectedWords.push(draggedWordIndex);
+    draggedWordIndex = undefined;
+    draggedWordSource = undefined;
+    playFeedbackSound("click");
+    renderChallenge();
+  }
+});
 textToggleButton.addEventListener("click", () => {
   isSentenceHidden = !isSentenceHidden;
   currentSentence.classList.toggle("is-hidden", isSentenceHidden);

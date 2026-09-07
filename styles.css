@@ -174,6 +174,10 @@ h1 em {
   border: 1px dashed #bfd2c5;
   border-radius: 5px;
 }
+.answer-zone.drag-over {
+  background: #e9f3eb;
+  border-color: var(--green);
+}
 .answer-placeholder {
   color: #9aa8a0;
   font-size: 12px;
@@ -200,10 +204,32 @@ h1 em {
     background 0.15s ease,
     opacity 0.15s ease;
 }
+.answer-drop-gap {
+  flex: 0 0 0;
+  width: 0;
+  height: 45px;
+  border-radius: 4px;
+  transition:
+    width 0.18s ease,
+    background 0.18s ease;
+}
+.answer-drop-gap.is-active {
+  flex-basis: 18px;
+  background: rgba(36, 91, 75, 0.16);
+}
 .word-button:hover,
 .answer-word:hover {
   transform: translateY(-1px);
   background: var(--mint);
+}
+.word-button[draggable="true"],
+.answer-word {
+  cursor: grab;
+}
+.word-button.is-dragging,
+.answer-word.is-dragging {
+  cursor: grabbing;
+  opacity: 0.45;
 }
 .word-button:active,
 .answer-word:active {
