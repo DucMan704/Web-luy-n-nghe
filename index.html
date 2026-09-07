@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>French Loop | Luyện nghe tiếng Pháp</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark">FR</span><span>French Loop</span>
+        </div>
+        <span class="status-pill"
+          ><span class="status-dot"></span
+          ><span id="statusText">Sẵn sàng luyện nghe</span></span
+        >
+      </header>
+
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">Khoảnh khắc nghe mỗi ngày</p>
+          <h1>Nghe một câu.<br /><em>Nhớ một cách.</em></h1>
+          <p class="intro">
+            Dán câu tiếng Pháp của bạn vào đây hoặc tải lên một tệp văn bản. Mỗi
+            lượt phát sẽ chọn một câu ngẫu nhiên.
+          </p>
+        </div>
+        <div class="hero-note" aria-label="Thông tin chế độ đọc">
+          <span class="note-icon">Aa</span>
+          <div>
+            <strong>Giọng Pháp tự nhiên</strong
+            ><small>fr-FR · Français standard · DELF B2</small>
+          </div>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <div class="input-panel panel">
+          <div class="panel-heading">
+            <div>
+              <span class="section-label">01 / Nguồn câu</span>
+              <h2>Thêm nội dung</h2>
+            </div>
+            <span class="line-count" id="lineCount">0 câu</span>
+          </div>
+          <textarea
+            id="textInput"
+            placeholder="Bonjour, comment allez-vous aujourd'hui ?&#10;&#10;Mỗi dòng là một câu để luyện nghe..."
+          ></textarea>
+          <div class="input-actions">
+            <label class="upload-button" for="fileInput"
+              ><span>↥</span> Tải tệp .txt</label
+            >
+            <input id="fileInput" type="file" accept=".txt,text/plain" />
+            <button class="load-button" id="loadSourceButton" type="button">
+              Nộp nguồn câu <span>→</span>
+            </button>
+            <button class="clear-button" id="clearButton" type="button">
+              Xóa nội dung
+            </button>
+          </div>
+        </div>
+
+        <div class="listen-panel panel">
+          <div class="panel-heading">
+            <div>
+              <span class="section-label">02 / Phòng nghe</span>
+              <h2>Focus sentence</h2>
+            </div>
+            <span class="language-tag">FR</span>
+          </div>
+          <div class="sentence-card" aria-live="polite">
+            <span class="quote-mark">“</span>
+            <p id="currentSentence">Thêm vài câu để bắt đầu.</p>
+            <span class="sentence-index" id="sentenceIndex">— / —</span>
+          </div>
+          <div class="player">
+            <div class="progress-row">
+              <span id="elapsedTime">00:00</span
+              ><input
+                id="progressBar"
+                type="range"
+                min="0"
+                max="100"
+                value="0"
+                aria-label="Vị trí câu hiện tại"
+              /><span id="totalTime">00:00</span>
+            </div>
+            <div class="player-controls">
+              <button
+                class="icon-button"
+                id="previousButton"
+                type="button"
+                title="Câu trước"
+                aria-label="Câu trước"
+              >
+                ↶
+              </button>
+              <button
+                class="play-button"
+                id="playButton"
+                type="button"
+                title="Phát hoặc tạm dừng"
+                aria-label="Phát hoặc tạm dừng"
+              >
+                <span id="playIcon">▶</span>
+              </button>
+              <button
+                class="icon-button"
+                id="nextButton"
+                type="button"
+                title="Câu tiếp theo"
+                aria-label="Câu tiếp theo"
+              >
+                ↷
+              </button>
+              <div class="volume-control">
+                <span class="volume-icon">◖</span
+                ><input
+                  id="volumeBar"
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value="1"
+                  aria-label="Âm lượng"
+                /><span id="volumeValue">100%</span>
+              </div>
+            </div>
+          </div>
+          <div class="speed-row">
+            <span>Tốc độ đọc</span>
+            <div class="speed-buttons" id="speedButtons">
+              <button type="button" data-speed="0.75">0.75×</button
+              ><button type="button" class="active" data-speed="1">1×</button
+              ><button type="button" data-speed="1.25">1.25×</button
+              ><button type="button" data-speed="1.5">1.5×</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section
+        class="challenge-panel panel"
+        id="challengePanel"
+        aria-labelledby="challengeTitle"
+      >
+        <div class="panel-heading">
+          <div>
+            <span class="section-label">03 / Nhớ lại</span>
+            <h2 id="challengeTitle">Xếp lại câu vừa nghe</h2>
+          </div>
+          <span class="challenge-count" id="challengeCount">0 từ</span>
+        </div>
+        <p class="challenge-hint" id="challengeHint">
+          Chọn từng từ để đặt chúng vào đúng thứ tự.
+        </p>
+        <div class="answer-zone" id="answerZone" aria-label="Các từ đã chọn">
+          <span class="answer-placeholder"
+            >Các từ bạn chọn sẽ xuất hiện ở đây</span
+          >
+        </div>
+        <div
+          class="word-bank"
+          id="wordBank"
+          aria-label="Các từ cần sắp xếp"
+        ></div>
+        <div class="challenge-actions">
+          <span
+            class="challenge-feedback"
+            id="challengeFeedback"
+            aria-live="polite"
+          ></span>
+          <button class="check-button" id="checkButton" type="button">
+            OK <span>→</span>
+          </button>
+        </div>
+      </section>
+
+      <footer>
+        <span>Gợi ý: mỗi dòng một câu sẽ cho nhịp luyện nghe rõ ràng hơn.</span
+        ><span id="voiceStatus">Đang tìm giọng đọc tiếng Pháp…</span>
+      </footer>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>
