@@ -278,22 +278,22 @@ function createAnswerDropGap(position) {
 async function loadTranslation(word) {
   const normalizedWord = word.replace(/[.,!?;:()[\]{}"']/g, "").trim();
   if (!normalizedWord || translationCache.has(normalizedWord)) return;
-  try {
-    const response = await fetch(
-      `/api/translate?q=${encodeURIComponent(normalizedWord)}`,
-    );
-    if (!response.ok) throw new Error("Translation request failed");
-    const { translatedText } = await response.json();
-    if (!translatedText) throw new Error("Empty translation");
-    translationCache.set(normalizedWord, translatedText);
-  } catch {
-    translationCache.set(normalizedWord, "Chưa lấy được nghĩa");
-  }
+  const response = await fetch(
+    `/api/translate?q=${encodeURIComponent(normalizedWord)}`,
+  );
+  if (!response.ok) throw new Error("Translation request failed");
+  const { translatedText } = await response.json();
+  if (!translatedText) throw new Error("Empty translation");
+  translationCache.set(normalizedWord, translatedText);
 }
 
 async function preloadTranslations() {
   const words = [...new Set(challengeWords.map((item) => item.word))];
-  for (const word of words) await loadTranslation(word);
+  for (const word of words) {
+    try {
+      await loadTranslation(word);
+    } catch {}
+  }
 }
 
 function addTranslationTooltip(button, word) {

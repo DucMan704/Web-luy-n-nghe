@@ -117,24 +117,58 @@ async function handleTranslation(request, response) {
     return;
   }
 
-  try {
-    const translationUrl = new URL("https://api.mymemory.translated.net/get");
-    translationUrl.searchParams.set("q", query);
-    translationUrl.searchParams.set("langpair", "fr|vi");
-    const translationResponse = await fetch(translationUrl, {
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!translationResponse.ok) {
-      throw new Error(`MyMemory HTTP ${translationResponse.status}`);
+  const providers = [
+    async () => {
+      const translationUrl = new URL("https://api.mymemory.translated.net/get");
+      translationUrl.searchParams.set("q", query);
+      translationUrl.searchParams.set("langpair", "fr|vi");
+      const translationResponse = await fetch(translationUrl, {
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!translationResponse.ok) {
+        throw new Error(`MyMemory HTTP ${translationResponse.status}`);
+      }
+      const data = await translationResponse.json();
+      return data.responseData?.translatedText?.trim();
+    },
+    async () => {
+      const translationUrl = new URL(
+        "https://translate.googleapis.com/translate_a/single",
+      );
+      translationUrl.searchParams.set("client", "gtx");
+      translationUrl.searchParams.set("sl", "fr");
+      translationUrl.searchParams.set("tl", "vi");
+      translationUrl.searchParams.set("dt", "t");
+      translationUrl.searchParams.set("q", query);
+      const translationResponse = await fetch(translationUrl, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!translationResponse.ok) {
+        throw new Error(`Google Translate HTTP ${translationResponse.status}`);
+      }
+      const data = await translationResponse.json();
+      return data[0]
+        ?.map((segment) => segment[0])
+        .filter(Boolean)
+        .join("")
+        .trim();
+    },
+  ];
+
+  for (const provider of providers) {
+    try {
+      const translatedText = await provider();
+      if (translatedText) {
+        sendJson(response, 200, { translatedText });
+        return;
+      }
+    } catch (error) {
+      console.error("Translation provider error:", error.message);
     }
-    const data = await translationResponse.json();
-    const translatedText = data.responseData?.translatedText?.trim();
-    if (!translatedText) throw new Error("MyMemory returned no translation");
-    sendJson(response, 200, { translatedText });
-  } catch (error) {
-    console.error("MyMemory translation error:", error.message);
-    sendJson(response, 502, { error: "Unable to translate this word" });
   }
+
+  sendJson(response, 502, { error: "Unable to translate this word" });
 }
 
 function serveFile(request, response) {
