@@ -1,6 +1,7 @@
 const textInput = document.querySelector("#textInput");
 const fileInput = document.querySelector("#fileInput");
 const currentSentence = document.querySelector("#currentSentence");
+const textToggleButton = document.querySelector("#textToggleButton");
 const sentenceIndex = document.querySelector("#sentenceIndex");
 const lineCount = document.querySelector("#lineCount");
 const playButton = document.querySelector("#playButton");
@@ -41,6 +42,9 @@ let elevenLabsVoiceId;
 let elevenLabsVoicePromise;
 let speechRequestId = 0;
 let isSpeechLoading = false;
+let isSentenceHidden = false;
+const translationCache = new Map();
+let activeTranslationTooltip;
 
 function playFeedbackSound(type) {
   const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -156,6 +160,7 @@ function renderSentence() {
   totalTime.textContent = formatTime(duration);
   progressBar.value = 0;
   elapsedTime.textContent = "00:00";
+  currentSentence.classList.toggle("is-hidden", isSentenceHidden);
   setupChallenge();
 }
 
@@ -192,6 +197,7 @@ function renderChallenge() {
     button.textContent = item.word;
     button.disabled = selectedWords.includes(item.index);
     button.addEventListener("click", () => selectWord(item.index));
+    addTranslationTooltip(button, item.word);
     wordBank.append(button);
   });
   selectedWords.forEach((wordIndex) => {
@@ -201,6 +207,7 @@ function renderChallenge() {
     button.textContent = challengeWords[wordIndex].word;
     button.title = "Bấm để bỏ từ này khỏi đáp án";
     button.addEventListener("click", () => removeWord(wordIndex));
+    addTranslationTooltip(button, challengeWords[wordIndex].word);
     answerZone.append(button);
   });
   if (!selectedWords.length && challengeWords.length) {
@@ -209,6 +216,50 @@ function renderChallenge() {
   }
   checkButton.disabled =
     !challengeWords.length || selectedWords.length !== challengeWords.length;
+}
+
+function addTranslationTooltip(button, word) {
+  const normalizedWord = word.replace(/[.,!?;:()[\]{}"']/g, "").trim();
+  if (!normalizedWord) return;
+  button.addEventListener("mouseenter", () =>
+    showTranslation(button, normalizedWord),
+  );
+  button.addEventListener("focus", () =>
+    showTranslation(button, normalizedWord),
+  );
+  button.addEventListener("mouseleave", hideTranslation);
+  button.addEventListener("blur", hideTranslation);
+}
+
+async function showTranslation(button, word) {
+  hideTranslation();
+  const tooltip = document.createElement("span");
+  tooltip.className = "translation-tooltip";
+  tooltip.textContent = "Đang dịch…";
+  button.append(tooltip);
+  activeTranslationTooltip = tooltip;
+
+  try {
+    let translatedText = translationCache.get(word);
+    if (!translatedText) {
+      const response = await fetch(
+        `/api/translate?q=${encodeURIComponent(word)}`,
+      );
+      if (!response.ok) throw new Error("Translation request failed");
+      ({ translatedText } = await response.json());
+      translationCache.set(word, translatedText);
+    }
+    if (activeTranslationTooltip === tooltip)
+      tooltip.textContent = translatedText;
+  } catch {
+    if (activeTranslationTooltip === tooltip)
+      tooltip.textContent = "Chưa lấy được nghĩa";
+  }
+}
+
+function hideTranslation() {
+  activeTranslationTooltip?.remove();
+  activeTranslationTooltip = undefined;
 }
 
 function shuffle(items) {
@@ -469,6 +520,14 @@ playButton.addEventListener("click", () => {
 });
 nextButton.addEventListener("click", () => chooseRandomSentence(true));
 checkButton.addEventListener("click", checkChallenge);
+textToggleButton.addEventListener("click", () => {
+  isSentenceHidden = !isSentenceHidden;
+  currentSentence.classList.toggle("is-hidden", isSentenceHidden);
+  textToggleButton.setAttribute("aria-pressed", String(isSentenceHidden));
+  textToggleButton.firstChild.textContent = isSentenceHidden
+    ? "Hiện chữ "
+    : "Ẩn chữ ";
+});
 previousButton.addEventListener("click", () => {
   if (!sentences.length) return;
   clearAudioCache();

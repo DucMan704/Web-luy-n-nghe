@@ -108,6 +108,35 @@ async function handleTextToSpeech(request, response) {
   }
 }
 
+async function handleTranslation(request, response) {
+  const requestUrl = new URL(request.url, `http://${request.headers.host}`);
+  const query = requestUrl.searchParams.get("q")?.trim();
+
+  if (!query || Buffer.byteLength(query, "utf8") > 500) {
+    sendJson(response, 400, { error: "A word up to 500 bytes is required" });
+    return;
+  }
+
+  try {
+    const translationUrl = new URL("https://api.mymemory.translated.net/get");
+    translationUrl.searchParams.set("q", query);
+    translationUrl.searchParams.set("langpair", "fr|vi");
+    const translationResponse = await fetch(translationUrl, {
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!translationResponse.ok) {
+      throw new Error(`MyMemory HTTP ${translationResponse.status}`);
+    }
+    const data = await translationResponse.json();
+    const translatedText = data.responseData?.translatedText?.trim();
+    if (!translatedText) throw new Error("MyMemory returned no translation");
+    sendJson(response, 200, { translatedText });
+  } catch (error) {
+    console.error("MyMemory translation error:", error.message);
+    sendJson(response, 502, { error: "Unable to translate this word" });
+  }
+}
+
 function serveFile(request, response) {
   const requestedPath =
     request.url === "/" ? "/index.html" : request.url.split("?")[0];
@@ -131,6 +160,10 @@ function serveFile(request, response) {
 const requestHandler = async (request, response) => {
   if (request.method === "POST" && request.url === "/api/tts") {
     await handleTextToSpeech(request, response);
+    return;
+  }
+  if (request.method === "GET" && request.url.startsWith("/api/translate")) {
+    await handleTranslation(request, response);
     return;
   }
   if (request.method === "GET") {
