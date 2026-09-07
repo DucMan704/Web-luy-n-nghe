@@ -39,41 +39,72 @@ function readBody(request) {
 async function handleTextToSpeech(request, response) {
   try {
     const { text } = JSON.parse(await readBody(request));
+
     if (typeof text !== "string" || !text.trim()) {
       sendJson(response, 400, { error: "Text is required" });
       return;
     }
+
     if (!elevenLabsApiKey) {
-      sendJson(response, 500, { error: "ELEVENLABS_API_KEY is missing" });
+      sendJson(response, 500, {
+        error: "ELEVENLABS_API_KEY is missing",
+      });
       return;
     }
+
     const elevenLabsResponse = await fetch(
       `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
       {
         method: "POST",
+
         headers: {
           "Content-Type": "application/json",
           "xi-api-key": elevenLabsApiKey,
         },
+
         body: JSON.stringify({
           text: text.trim(),
-          model_id: modelId,
+
+          // Model
+          model_id: "eleven_v3",
+
+          // Explicitly tell ElevenLabs that the text is French
+          language_code: "fr",
+
+          // Natural French delivery
+          voice_settings: {
+            stability: 0.45,
+            similarity_boost: 0.8,
+            style: 0.0,
+            use_speaker_boost: true,
+          },
+
           output_format: "mp3_44100_128",
         }),
+
         signal: AbortSignal.timeout(15000),
       },
     );
+
     if (!elevenLabsResponse.ok) {
+      const errorText = await elevenLabsResponse.text();
+      console.error("ElevenLabs error:", errorText);
+
       throw new Error(`ElevenLabs HTTP ${elevenLabsResponse.status}`);
     }
+
     response.writeHead(200, {
       "Content-Type": "audio/mpeg",
       "Cache-Control": "no-store",
     });
+
     Readable.fromWeb(elevenLabsResponse.body).pipe(response);
   } catch (error) {
     console.error("ElevenLabs TTS error:", error.message);
-    sendJson(response, 502, { error: "Unable to generate French audio" });
+
+    sendJson(response, 502, {
+      error: "Unable to generate French audio",
+    });
   }
 }
 
