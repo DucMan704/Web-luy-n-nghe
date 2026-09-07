@@ -36,7 +36,7 @@ let wordBankOrder = [];
 let selectedWords = [];
 let audioContext;
 let audioPlayer;
-let audioUrl;
+let cachedAudioUrl;
 let elevenLabsVoiceId;
 let elevenLabsVoicePromise;
 let speechRequestId = 0;
@@ -121,6 +121,7 @@ function updateDraftCount() {
 
 function submitSource() {
   stopPlayback();
+  clearAudioCache();
   currentIndex = -1;
   updateList();
   statusText.textContent = sentences.length
@@ -135,6 +136,7 @@ function chooseRandomSentence(autoplay = true) {
     stopAudio();
     window.speechSynthesis.cancel();
   }
+  clearAudioCache();
   let nextIndex = Math.floor(Math.random() * sentences.length);
   if (sentences.length > 1 && nextIndex === currentIndex)
     nextIndex = (nextIndex + 1) % sentences.length;
@@ -279,16 +281,20 @@ function speak() {
 
 async function speakWithElevenLabs(requestId) {
   statusText.textContent = "Đang tải giọng đọc DELF B2…";
-  const response = await fetch("/api/tts", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text: sentences[currentIndex] }),
-  });
-  if (!response.ok) throw new Error(`ElevenLabs HTTP ${response.status}`);
-  const blob = await response.blob();
+  const sentence = sentences[currentIndex];
+  if (!cachedAudioUrl) {
+    const response = await fetch("/api/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: sentence }),
+    });
+    if (!response.ok) throw new Error(`ElevenLabs HTTP ${response.status}`);
+    const blob = await response.blob();
+    if (requestId !== speechRequestId) return;
+    cachedAudioUrl = URL.createObjectURL(blob);
+  }
   if (requestId !== speechRequestId) return;
-  audioUrl = URL.createObjectURL(blob);
-  audioPlayer = new Audio(audioUrl);
+  audioPlayer = new Audio(cachedAudioUrl);
   audioPlayer.volume = volume;
   audioPlayer.playbackRate = speed;
   audioPlayer.onloadedmetadata = () => {
@@ -316,6 +322,7 @@ async function speakWithElevenLabs(requestId) {
   audioPlayer.onerror = () => {
     isSpeechLoading = false;
     playButton.disabled = false;
+    clearAudioCache();
     stopAudio();
     speakWithBrowser();
   };
@@ -374,13 +381,16 @@ function stopAudio() {
     audioPlayer.load();
     audioPlayer = null;
   }
-  if (audioUrl) {
-    URL.revokeObjectURL(audioUrl);
-    audioUrl = undefined;
-  }
   stopProgress();
   isSpeechLoading = false;
   playButton.disabled = false;
+}
+
+function clearAudioCache() {
+  if (cachedAudioUrl) {
+    URL.revokeObjectURL(cachedAudioUrl);
+    cachedAudioUrl = undefined;
+  }
 }
 
 function selectFrenchVoice() {
@@ -447,6 +457,7 @@ fileInput.addEventListener("change", () => {
 loadSourceButton.addEventListener("click", submitSource);
 document.querySelector("#clearButton").addEventListener("click", () => {
   textInput.value = "";
+  clearAudioCache();
   currentIndex = -1;
   updateList();
   textInput.focus();
@@ -460,6 +471,7 @@ nextButton.addEventListener("click", () => chooseRandomSentence(true));
 checkButton.addEventListener("click", checkChallenge);
 previousButton.addEventListener("click", () => {
   if (!sentences.length) return;
+  clearAudioCache();
   currentIndex = (currentIndex - 1 + sentences.length) % sentences.length;
   renderSentence();
   speak();
@@ -476,6 +488,7 @@ progressBar.addEventListener("input", () => {
     Math.floor((Number(progressBar.value) / 100) * sentences.length),
   );
   if (targetIndex !== currentIndex) {
+    clearAudioCache();
     currentIndex = targetIndex;
     renderSentence();
   }
