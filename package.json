@@ -5,6 +5,7 @@
   },
   "dependencies": {
     "@elevenlabs/elevenlabs-js": "^2.67.0",
+    "better-sqlite3": "^13.0.3",
     "dotenv": "^17.4.2"
   }
 }

@@ -1,12 +1,27 @@
-import { createReadStream } from "node:fs";
-import { existsSync, statSync } from "node:fs";
-import { extname, join, normalize } from "node:path";
+import { createReadStream, existsSync, mkdirSync, statSync } from "node:fs";
+import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
 import { createServer } from "node:http";
+import Database from "better-sqlite3";
 import "dotenv/config";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
+const databasePath =
+  process.env.SQLITE_DB_PATH || join(root, "data", "history.db");
+const dataDirectory = dirname(databasePath);
+mkdirSync(dataDirectory, { recursive: true });
+const database = new Database(databasePath);
+database.pragma("journal_mode = WAL");
+database.exec(`
+  CREATE TABLE IF NOT EXISTS saved_contents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    line_count INTEGER NOT NULL,
+    saved_at INTEGER NOT NULL
+  )
+`);
 const port = Number(process.env.PORT || 3000);
 const elevenLabsApiKey = process.env.ELEVENLABS_API_KEY;
 const voiceId = "JBFqnCBsd6RMkjVDRZzb";
@@ -34,6 +49,65 @@ function sendJson(response, statusCode, payload) {
 
 function handleHealthCheck(response) {
   sendJson(response, 200, { status: "ok" });
+}
+
+function handleGetHistory(response) {
+  const savedContents = database
+    .prepare(
+      `SELECT id, title, content, line_count AS lineCount, saved_at AS savedAt
+       FROM saved_contents ORDER BY saved_at DESC, id DESC LIMIT 20`,
+    )
+    .all();
+  sendJson(response, 200, savedContents);
+}
+
+async function handleCreateHistory(request, response) {
+  try {
+    const { title, content, lineCount } = JSON.parse(await readBody(request));
+    if (
+      typeof title !== "string" ||
+      typeof content !== "string" ||
+      !content.trim() ||
+      !Number.isInteger(lineCount) ||
+      lineCount < 1
+    ) {
+      sendJson(response, 400, { error: "Invalid saved content" });
+      return;
+    }
+
+    const result = database
+      .prepare(
+        `INSERT INTO saved_contents (title, content, line_count, saved_at)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run(title.trim().slice(0, 100), content.trim(), lineCount, Date.now());
+    const savedContent = database
+      .prepare(
+        `SELECT id, title, content, line_count AS lineCount, saved_at AS savedAt
+         FROM saved_contents WHERE id = ?`,
+      )
+      .get(result.lastInsertRowid);
+    sendJson(response, 201, savedContent);
+  } catch {
+    sendJson(response, 400, { error: "Invalid history request" });
+  }
+}
+
+async function handleDeleteHistory(request, response) {
+  const historyId = Number(request.url.split("/").pop());
+  if (!Number.isInteger(historyId) || historyId < 1) {
+    sendJson(response, 400, { error: "Invalid history id" });
+    return;
+  }
+  const result = database
+    .prepare("DELETE FROM saved_contents WHERE id = ?")
+    .run(historyId);
+  if (!result.changes) {
+    sendJson(response, 404, { error: "History item not found" });
+    return;
+  }
+  response.writeHead(204);
+  response.end();
 }
 
 function startKeepAlive() {
@@ -242,6 +316,18 @@ function serveFile(request, response) {
 const requestHandler = async (request, response) => {
   if (request.method === "GET" && request.url === "/api/health") {
     handleHealthCheck(response);
+    return;
+  }
+  if (request.method === "GET" && request.url === "/api/history") {
+    handleGetHistory(response);
+    return;
+  }
+  if (request.method === "POST" && request.url === "/api/history") {
+    await handleCreateHistory(request, response);
+    return;
+  }
+  if (request.method === "DELETE" && request.url.startsWith("/api/history/")) {
+    await handleDeleteHistory(request, response);
     return;
   }
   lastUserRequestAt = Date.now();

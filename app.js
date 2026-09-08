@@ -49,8 +49,6 @@ let speechRequestId = 0;
 let isSpeechLoading = false;
 let isSentenceHidden = false;
 const translationCache = new Map();
-const savedContentStorageKey = "french-loop-saved-content";
-const maximumSavedContents = 20;
 let activeTranslationTooltip;
 let draggedWordIndex;
 let draggedWordSource;
@@ -132,24 +130,6 @@ function updateDraftCount() {
   lineCount.textContent = draftCount ? `${draftCount} câu chờ nộp` : "0 câu";
 }
 
-function getSavedContents() {
-  try {
-    const savedContents = JSON.parse(
-      localStorage.getItem(savedContentStorageKey) || "[]",
-    );
-    return Array.isArray(savedContents) ? savedContents : [];
-  } catch {
-    return [];
-  }
-}
-
-function setSavedContents(savedContents) {
-  localStorage.setItem(
-    savedContentStorageKey,
-    JSON.stringify(savedContents.slice(0, maximumSavedContents)),
-  );
-}
-
 function formatSavedDate(timestamp) {
   return new Intl.DateTimeFormat("vi-VN", {
     day: "2-digit",
@@ -159,8 +139,25 @@ function formatSavedDate(timestamp) {
   }).format(new Date(timestamp));
 }
 
-function renderSavedContents() {
-  const savedContents = getSavedContents();
+async function getSavedContents() {
+  const response = await fetch("/api/history");
+  if (!response.ok) throw new Error("Unable to load history");
+  return response.json();
+}
+
+async function renderSavedContents() {
+  let savedContents;
+  try {
+    savedContents = await getSavedContents();
+  } catch {
+    historyCount.textContent = "0";
+    historyList.replaceChildren();
+    const errorMessage = document.createElement("p");
+    errorMessage.className = "history-empty";
+    errorMessage.textContent = "Không thể tải lịch sử lúc này.";
+    historyList.append(errorMessage);
+    return;
+  }
   historyCount.textContent = savedContents.length;
   historyList.replaceChildren();
 
@@ -200,13 +197,11 @@ function renderSavedContents() {
     deleteButton.type = "button";
     deleteButton.className = "history-delete-button";
     deleteButton.textContent = "Xóa";
-    deleteButton.addEventListener("click", () => {
-      setSavedContents(
-        getSavedContents().filter(
-          (itemToKeep) => itemToKeep.id !== savedContent.id,
-        ),
-      );
-      renderSavedContents();
+    deleteButton.addEventListener("click", async () => {
+      const response = await fetch(`/api/history/${savedContent.id}`, {
+        method: "DELETE",
+      });
+      if (response.ok) renderSavedContents();
     });
     actions.append(useButton, deleteButton);
     item.append(details, actions);
@@ -214,7 +209,7 @@ function renderSavedContents() {
   });
 }
 
-function saveCurrentContent() {
+async function saveCurrentContent() {
   const content = textInput.value.trim();
   if (!content) {
     statusText.textContent = "Chưa có nội dung để lưu";
@@ -224,17 +219,22 @@ function saveCurrentContent() {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
-  const savedContents = getSavedContents();
-  savedContents.unshift({
-    id: Date.now(),
-    title: lines[0].slice(0, 52) || "Nội dung luyện nghe",
-    content,
-    lineCount: lines.length,
-    savedAt: Date.now(),
-  });
-  setSavedContents(savedContents);
-  renderSavedContents();
-  statusText.textContent = "Đã lưu nội dung trên thiết bị này";
+  try {
+    const response = await fetch("/api/history", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: lines[0].slice(0, 52) || "Nội dung luyện nghe",
+        content,
+        lineCount: lines.length,
+      }),
+    });
+    if (!response.ok) throw new Error("Unable to save history");
+    await renderSavedContents();
+    statusText.textContent = "Đã lưu nội dung vào SQLite";
+  } catch {
+    statusText.textContent = "Không thể lưu lịch sử lúc này";
+  }
 }
 
 function closeHistory() {
@@ -810,3 +810,4 @@ window.speechSynthesis?.addEventListener("voiceschanged", () => {
     : "Trình duyệt sẽ dùng giọng Pháp mặc định";
 });
 updateList();
+renderSavedContents();
