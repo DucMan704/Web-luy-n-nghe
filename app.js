@@ -23,6 +23,11 @@ const challengeFeedback = document.querySelector("#challengeFeedback");
 const checkButton = document.querySelector("#checkButton");
 const challengePanel = document.querySelector("#challengePanel");
 const loadSourceButton = document.querySelector("#loadSourceButton");
+const saveContentButton = document.querySelector("#saveContentButton");
+const historyButton = document.querySelector("#historyButton");
+const historyPanel = document.querySelector("#historyPanel");
+const historyList = document.querySelector("#historyList");
+const historyCount = document.querySelector("#historyCount");
 
 let sentences = [];
 let currentIndex = -1;
@@ -44,6 +49,8 @@ let speechRequestId = 0;
 let isSpeechLoading = false;
 let isSentenceHidden = false;
 const translationCache = new Map();
+const savedContentStorageKey = "french-loop-saved-content";
+const maximumSavedContents = 20;
 let activeTranslationTooltip;
 let draggedWordIndex;
 let draggedWordSource;
@@ -123,6 +130,123 @@ function updateList() {
 function updateDraftCount() {
   const draftCount = getSentences().length;
   lineCount.textContent = draftCount ? `${draftCount} câu chờ nộp` : "0 câu";
+}
+
+function getSavedContents() {
+  try {
+    const savedContents = JSON.parse(
+      localStorage.getItem(savedContentStorageKey) || "[]",
+    );
+    return Array.isArray(savedContents) ? savedContents : [];
+  } catch {
+    return [];
+  }
+}
+
+function setSavedContents(savedContents) {
+  localStorage.setItem(
+    savedContentStorageKey,
+    JSON.stringify(savedContents.slice(0, maximumSavedContents)),
+  );
+}
+
+function formatSavedDate(timestamp) {
+  return new Intl.DateTimeFormat("vi-VN", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(timestamp));
+}
+
+function renderSavedContents() {
+  const savedContents = getSavedContents();
+  historyCount.textContent = savedContents.length;
+  historyList.replaceChildren();
+
+  if (!savedContents.length) {
+    const emptyMessage = document.createElement("p");
+    emptyMessage.className = "history-empty";
+    emptyMessage.textContent = "Chưa có nội dung nào được lưu.";
+    historyList.append(emptyMessage);
+    return;
+  }
+
+  savedContents.forEach((savedContent) => {
+    const item = document.createElement("article");
+    item.className = "history-item";
+
+    const details = document.createElement("div");
+    details.className = "history-item-details";
+    const title = document.createElement("strong");
+    title.textContent = savedContent.title;
+    const meta = document.createElement("span");
+    meta.textContent = `${savedContent.lineCount} câu · ${formatSavedDate(savedContent.savedAt)}`;
+    details.append(title, meta);
+
+    const actions = document.createElement("div");
+    actions.className = "history-item-actions";
+    const useButton = document.createElement("button");
+    useButton.type = "button";
+    useButton.className = "history-use-button";
+    useButton.textContent = "Dùng lại";
+    useButton.addEventListener("click", () => {
+      textInput.value = savedContent.content;
+      updateDraftCount();
+      submitSource();
+      closeHistory();
+    });
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "history-delete-button";
+    deleteButton.textContent = "Xóa";
+    deleteButton.addEventListener("click", () => {
+      setSavedContents(
+        getSavedContents().filter(
+          (itemToKeep) => itemToKeep.id !== savedContent.id,
+        ),
+      );
+      renderSavedContents();
+    });
+    actions.append(useButton, deleteButton);
+    item.append(details, actions);
+    historyList.append(item);
+  });
+}
+
+function saveCurrentContent() {
+  const content = textInput.value.trim();
+  if (!content) {
+    statusText.textContent = "Chưa có nội dung để lưu";
+    return;
+  }
+  const lines = content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const savedContents = getSavedContents();
+  savedContents.unshift({
+    id: Date.now(),
+    title: lines[0].slice(0, 52) || "Nội dung luyện nghe",
+    content,
+    lineCount: lines.length,
+    savedAt: Date.now(),
+  });
+  setSavedContents(savedContents);
+  renderSavedContents();
+  statusText.textContent = "Đã lưu nội dung trên thiết bị này";
+}
+
+function closeHistory() {
+  historyPanel.hidden = true;
+  historyButton.setAttribute("aria-expanded", "false");
+}
+
+function toggleHistory() {
+  const isOpening = historyPanel.hidden;
+  if (isOpening) renderSavedContents();
+  historyPanel.hidden = !isOpening;
+  historyButton.setAttribute("aria-expanded", String(isOpening));
 }
 
 function submitSource() {
@@ -597,6 +721,8 @@ fileInput.addEventListener("change", () => {
   reader.readAsText(file);
 });
 loadSourceButton.addEventListener("click", submitSource);
+saveContentButton.addEventListener("click", saveCurrentContent);
+historyButton.addEventListener("click", toggleHistory);
 document.querySelector("#clearButton").addEventListener("click", () => {
   textInput.value = "";
   clearAudioCache();
