@@ -11,6 +11,13 @@ const port = Number(process.env.PORT || 3000);
 const elevenLabsApiKey = process.env.ELEVENLABS_API_KEY;
 const voiceId = "JBFqnCBsd6RMkjVDRZzb";
 const modelId = "eleven_v3";
+const translationCache = new Map();
+const keepAliveUrl =
+  process.env.KEEP_ALIVE_URL ||
+  process.env.APP_URL ||
+  process.env.RENDER_EXTERNAL_URL;
+const keepAliveInterval = 10 * 60 * 1000;
+let lastUserRequestAt = Date.now();
 
 const contentTypes = {
   ".css": "text/css; charset=utf-8",
@@ -23,6 +30,37 @@ function sendJson(response, statusCode, payload) {
     "Content-Type": "application/json; charset=utf-8",
   });
   response.end(JSON.stringify(payload));
+}
+
+function handleHealthCheck(response) {
+  sendJson(response, 200, { status: "ok" });
+}
+
+function startKeepAlive() {
+  if (!keepAliveUrl) {
+    console.warn(
+      "Keep-alive chưa bật: hãy cấu hình KEEP_ALIVE_URL hoặc APP_URL.",
+    );
+    return;
+  }
+
+  setInterval(async () => {
+    if (Date.now() - lastUserRequestAt < keepAliveInterval) return;
+
+    try {
+      const response = await fetch(`${keepAliveUrl}/api/health`, {
+        signal: AbortSignal.timeout(10000),
+        headers: { "User-Agent": "French-Loop-Keep-Alive" },
+      });
+      if (!response.ok) {
+        console.warn(`Keep-alive HTTP ${response.status}`);
+        return;
+      }
+      console.log("Keep-alive ping thành công");
+    } catch (error) {
+      console.warn("Keep-alive thất bại:", error.message);
+    }
+  }, keepAliveInterval).unref();
 }
 
 function readBody(request) {
@@ -117,20 +155,13 @@ async function handleTranslation(request, response) {
     return;
   }
 
+  const cachedTranslation = translationCache.get(query.toLowerCase());
+  if (cachedTranslation) {
+    sendJson(response, 200, { translatedText: cachedTranslation });
+    return;
+  }
+
   const providers = [
-    async () => {
-      const translationUrl = new URL("https://api.mymemory.translated.net/get");
-      translationUrl.searchParams.set("q", query);
-      translationUrl.searchParams.set("langpair", "fr|vi");
-      const translationResponse = await fetch(translationUrl, {
-        signal: AbortSignal.timeout(10000),
-      });
-      if (!translationResponse.ok) {
-        throw new Error(`MyMemory HTTP ${translationResponse.status}`);
-      }
-      const data = await translationResponse.json();
-      return data.responseData?.translatedText?.trim();
-    },
     async () => {
       const translationUrl = new URL(
         "https://translate.googleapis.com/translate_a/single",
@@ -154,12 +185,29 @@ async function handleTranslation(request, response) {
         .join("")
         .trim();
     },
+    async () => {
+      const translationUrl = new URL("https://api.mymemory.translated.net/get");
+      translationUrl.searchParams.set("q", query);
+      translationUrl.searchParams.set("langpair", "fr|vi");
+      if (process.env.MYMEMORY_EMAIL) {
+        translationUrl.searchParams.set("de", process.env.MYMEMORY_EMAIL);
+      }
+      const translationResponse = await fetch(translationUrl, {
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!translationResponse.ok) {
+        throw new Error(`MyMemory HTTP ${translationResponse.status}`);
+      }
+      const data = await translationResponse.json();
+      return data.responseData?.translatedText?.trim();
+    },
   ];
 
   for (const provider of providers) {
     try {
       const translatedText = await provider();
       if (translatedText) {
+        translationCache.set(query.toLowerCase(), translatedText);
         sendJson(response, 200, { translatedText });
         return;
       }
@@ -192,6 +240,11 @@ function serveFile(request, response) {
 }
 
 const requestHandler = async (request, response) => {
+  if (request.method === "GET" && request.url === "/api/health") {
+    handleHealthCheck(response);
+    return;
+  }
+  lastUserRequestAt = Date.now();
   if (request.method === "POST" && request.url === "/api/tts") {
     await handleTextToSpeech(request, response);
     return;
@@ -222,6 +275,7 @@ function startServer(portToTry) {
   });
   server.listen(portToTry, () => {
     console.log(`French Loop running at http://localhost:${portToTry}`);
+    startKeepAlive();
   });
 }
 
