@@ -1,27 +1,15 @@
-import { createReadStream, existsSync, mkdirSync, statSync } from "node:fs";
-import { dirname, extname, join, normalize } from "node:path";
+import { createReadStream, existsSync, statSync } from "node:fs";
+import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
 import { createServer } from "node:http";
-import Database from "better-sqlite3";
+import { MongoClient, ObjectId } from "mongodb";
 import "dotenv/config";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
-const databasePath =
-  process.env.SQLITE_DB_PATH || join(root, "data", "history.db");
-const dataDirectory = dirname(databasePath);
-mkdirSync(dataDirectory, { recursive: true });
-const database = new Database(databasePath);
-database.pragma("journal_mode = WAL");
-database.exec(`
-  CREATE TABLE IF NOT EXISTS saved_contents (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    content TEXT NOT NULL,
-    line_count INTEGER NOT NULL,
-    saved_at INTEGER NOT NULL
-  )
-`);
+const mongodbUri = process.env.MONGODB_URI;
+const mongodbClient = mongodbUri ? new MongoClient(mongodbUri) : null;
+let savedContentsCollection;
 const port = Number(process.env.PORT || 3000);
 const elevenLabsApiKey = process.env.ELEVENLABS_API_KEY;
 const voiceId = "JBFqnCBsd6RMkjVDRZzb";
@@ -51,14 +39,22 @@ function handleHealthCheck(response) {
   sendJson(response, 200, { status: "ok" });
 }
 
-function handleGetHistory(response) {
-  const savedContents = database
-    .prepare(
-      `SELECT id, title, content, line_count AS lineCount, saved_at AS savedAt
-       FROM saved_contents ORDER BY saved_at DESC, id DESC LIMIT 20`,
+async function handleGetHistory(response) {
+  const savedContents = await savedContentsCollection
+    .find(
+      {},
+      {
+        projection: { _id: 1, title: 1, content: 1, lineCount: 1, savedAt: 1 },
+      },
     )
-    .all();
-  sendJson(response, 200, savedContents);
+    .sort({ savedAt: -1, _id: -1 })
+    .limit(20)
+    .toArray();
+  const history = savedContents.map(({ _id, ...savedContent }) => ({
+    ...savedContent,
+    id: _id.toString(),
+  }));
+  sendJson(response, 200, history);
 }
 
 async function handleCreateHistory(request, response) {
@@ -75,34 +71,32 @@ async function handleCreateHistory(request, response) {
       return;
     }
 
-    const result = database
-      .prepare(
-        `INSERT INTO saved_contents (title, content, line_count, saved_at)
-         VALUES (?, ?, ?, ?)`,
-      )
-      .run(title.trim().slice(0, 100), content.trim(), lineCount, Date.now());
-    const savedContent = database
-      .prepare(
-        `SELECT id, title, content, line_count AS lineCount, saved_at AS savedAt
-         FROM saved_contents WHERE id = ?`,
-      )
-      .get(result.lastInsertRowid);
-    sendJson(response, 201, savedContent);
+    const savedContent = {
+      title: title.trim().slice(0, 100),
+      content: content.trim(),
+      lineCount,
+      savedAt: Date.now(),
+    };
+    const result = await savedContentsCollection.insertOne(savedContent);
+    sendJson(response, 201, {
+      ...savedContent,
+      id: result.insertedId.toString(),
+    });
   } catch {
     sendJson(response, 400, { error: "Invalid history request" });
   }
 }
 
 async function handleDeleteHistory(request, response) {
-  const historyId = Number(request.url.split("/").pop());
-  if (!Number.isInteger(historyId) || historyId < 1) {
+  const historyId = request.url.split("/").pop();
+  if (!ObjectId.isValid(historyId)) {
     sendJson(response, 400, { error: "Invalid history id" });
     return;
   }
-  const result = database
-    .prepare("DELETE FROM saved_contents WHERE id = ?")
-    .run(historyId);
-  if (!result.changes) {
+  const result = await savedContentsCollection.deleteOne({
+    _id: new ObjectId(historyId),
+  });
+  if (!result.deletedCount) {
     sendJson(response, 404, { error: "History item not found" });
     return;
   }
@@ -319,7 +313,7 @@ const requestHandler = async (request, response) => {
     return;
   }
   if (request.method === "GET" && request.url === "/api/history") {
-    handleGetHistory(response);
+    await handleGetHistory(response);
     return;
   }
   if (request.method === "POST" && request.url === "/api/history") {
@@ -365,4 +359,19 @@ function startServer(portToTry) {
   });
 }
 
-startServer(port);
+async function start() {
+  if (!mongodbClient) {
+    throw new Error("MONGODB_URI is missing");
+  }
+  await mongodbClient.connect();
+  const mongodbDatabase = mongodbClient.db("Listening");
+  savedContentsCollection = mongodbDatabase.collection("history");
+  await savedContentsCollection.createIndex({ savedAt: -1 });
+  console.log("MongoDB connected");
+  startServer(port);
+}
+
+start().catch((error) => {
+  console.error("MongoDB connection failed:", error.message);
+  process.exitCode = 1;
+});
