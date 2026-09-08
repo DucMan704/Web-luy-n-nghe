@@ -30,7 +30,7 @@
           <h1>Nghe một câu.<br /><em>Nhớ một cách.</em></h1>
           <p class="intro">
             Dán câu tiếng Pháp của bạn vào đây hoặc tải lên một tệp văn bản. Mỗi
-            lượt phát sẽ chọn một câu ngẫu nhiên.
+            câu sẽ được luyện theo thứ tự từ trên xuống dưới.
           </p>
         </div>
         <div class="hero-note" aria-label="Thông tin chế độ đọc">
@@ -213,6 +213,14 @@
           </button>
         </div>
       </section>
+
+      <div class="completion-message" id="completionMessage" role="status" aria-live="polite" hidden>
+        <div class="completion-card">
+          <span class="completion-mark">✓</span>
+          <h2>Chúc mừng!</h2>
+          <p>Bạn đã hoàn thành tất cả các câu.</p>
+        </div>
+      </div>
 
       <footer>
         <span>Gợi ý: mỗi dòng một câu sẽ cho nhịp luyện nghe rõ ràng hơn.</span

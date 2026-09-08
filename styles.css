@@ -148,6 +148,59 @@ h1 em {
 .challenge-panel {
   margin-top: 18px;
 }
+.completion-message {
+  position: fixed;
+  z-index: 10;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(20, 32, 29, 0.28);
+}
+.completion-message[hidden] {
+  display: none;
+}
+.completion-card {
+  width: min(100%, 390px);
+  padding: 38px 30px;
+  text-align: center;
+  background: var(--panel);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 8px;
+  box-shadow: 0 24px 70px rgba(20, 32, 29, 0.2);
+  animation: completion-pop 0.45s ease both;
+}
+.completion-mark {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 15px;
+  color: white;
+  background: var(--green);
+  border-radius: 50%;
+  font-size: 27px;
+}
+.completion-card h2 {
+  margin-bottom: 8px;
+  color: var(--green);
+  font: 700 29px Fraunces, serif;
+}
+.completion-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+@keyframes completion-pop {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
 .challenge-panel.is-correct {
   animation: correct-pulse 0.6s ease;
 }

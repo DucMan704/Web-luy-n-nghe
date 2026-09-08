@@ -28,9 +28,11 @@ const historyButton = document.querySelector("#historyButton");
 const historyPanel = document.querySelector("#historyPanel");
 const historyList = document.querySelector("#historyList");
 const historyCount = document.querySelector("#historyCount");
+const completionMessage = document.querySelector("#completionMessage");
 
 let sentences = [];
 let currentIndex = -1;
+let completedIndices = new Set();
 let isPlaying = false;
 let speed = 1;
 let volume = 1;
@@ -118,7 +120,7 @@ function updateList() {
     sentenceIndex.textContent = "— / —";
     stopPlayback();
   } else if (currentIndex === -1) {
-    chooseRandomSentence(false);
+    chooseNextSentence(false);
   } else if (currentIndex >= sentences.length) {
     currentIndex = 0;
     renderSentence();
@@ -252,6 +254,8 @@ function toggleHistory() {
 function submitSource() {
   stopPlayback();
   clearAudioCache();
+  completedIndices = new Set();
+  completionMessage.hidden = true;
   currentIndex = -1;
   updateList();
   statusText.textContent = sentences.length
@@ -259,7 +263,7 @@ function submitSource() {
     : "Chưa có câu để luyện nghe";
 }
 
-function chooseRandomSentence(autoplay = true) {
+function chooseNextSentence(autoplay = true) {
   if (!sentences.length) return;
   if (autoplay) {
     speechRequestId += 1;
@@ -267,12 +271,17 @@ function chooseRandomSentence(autoplay = true) {
     window.speechSynthesis.cancel();
   }
   clearAudioCache();
-  let nextIndex = Math.floor(Math.random() * sentences.length);
-  if (sentences.length > 1 && nextIndex === currentIndex)
-    nextIndex = (nextIndex + 1) % sentences.length;
+  const nextIndex = currentIndex + 1;
+  if (nextIndex >= sentences.length) return;
   currentIndex = nextIndex;
   renderSentence();
   if (autoplay) speak();
+}
+
+function showCompletionMessage() {
+  stopPlayback();
+  completionMessage.hidden = false;
+  statusText.textContent = "Đã hoàn thành tất cả câu";
 }
 
 function renderSentence() {
@@ -507,12 +516,16 @@ function checkChallenge() {
     .join(" ");
   const solution = challengeWords.map((item) => item.word).join(" ");
   if (answer === solution) {
+    completedIndices.add(currentIndex);
     playFeedbackSound("correct");
     animateChallenge("correct");
     challengeFeedback.textContent = "Chính xác! Đang chuyển sang câu mới…";
     challengeFeedback.className = "challenge-feedback success";
     checkButton.disabled = true;
-    window.setTimeout(() => chooseRandomSentence(true), 650);
+    window.setTimeout(() => {
+      if (completedIndices.size === sentences.length) showCompletionMessage();
+      else chooseNextSentence(true);
+    }, 650);
   } else {
     playFeedbackSound("wrong");
     animateChallenge("wrong");
@@ -726,16 +739,18 @@ historyButton.addEventListener("click", toggleHistory);
 document.querySelector("#clearButton").addEventListener("click", () => {
   textInput.value = "";
   clearAudioCache();
+  completedIndices = new Set();
+  completionMessage.hidden = true;
   currentIndex = -1;
   updateList();
   textInput.focus();
 });
 playButton.addEventListener("click", () => {
   if (isPlaying) stopPlayback();
-  else if (currentIndex < 0) chooseRandomSentence(true);
+  else if (currentIndex < 0) chooseNextSentence(true);
   else speak();
 });
-nextButton.addEventListener("click", () => chooseRandomSentence(true));
+nextButton.addEventListener("click", () => chooseNextSentence(true));
 checkButton.addEventListener("click", checkChallenge);
 answerZone.addEventListener("dragover", (event) => {
   event.preventDefault();
