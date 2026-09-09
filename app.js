@@ -45,8 +45,7 @@ let selectedWords = [];
 let audioContext;
 let audioPlayer;
 let cachedAudioUrl;
-let elevenLabsVoiceId;
-let elevenLabsVoicePromise;
+let currentHistoryId;
 let speechRequestId = 0;
 let isSpeechLoading = false;
 let isSentenceHidden = false;
@@ -192,7 +191,7 @@ async function renderSavedContents() {
     useButton.addEventListener("click", () => {
       textInput.value = savedContent.content;
       updateDraftCount();
-      submitSource();
+      submitSource(savedContent.id);
       closeHistory();
     });
     const deleteButton = document.createElement("button");
@@ -232,6 +231,8 @@ async function saveCurrentContent() {
       }),
     });
     if (!response.ok) throw new Error("Unable to save history");
+    const savedContent = await response.json();
+    currentHistoryId = savedContent.id;
     await renderSavedContents();
     statusText.textContent = "Đã lưu nội dung vào SQLite";
   } catch {
@@ -251,7 +252,8 @@ function toggleHistory() {
   historyButton.setAttribute("aria-expanded", String(isOpening));
 }
 
-function submitSource() {
+function submitSource(historyId) {
+  currentHistoryId = historyId;
   stopPlayback();
   clearAudioCache();
   completedIndices = new Set();
@@ -559,13 +561,17 @@ function speak() {
 }
 
 async function speakWithElevenLabs(requestId) {
-  statusText.textContent = "Đang tải giọng đọc DELF B2…";
+  statusText.textContent = "Đang tải giọng đọc ElevenLabs…";
   const sentence = sentences[currentIndex];
   if (!cachedAudioUrl) {
     const response = await fetch("/api/tts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: sentence }),
+      body: JSON.stringify({
+        text: sentence,
+        historyId: currentHistoryId,
+        sentenceIndex: currentIndex,
+      }),
     });
     if (!response.ok) throw new Error(`ElevenLabs HTTP ${response.status}`);
     const blob = await response.blob();
@@ -585,7 +591,7 @@ async function speakWithElevenLabs(requestId) {
     playButton.disabled = false;
     isPlaying = true;
     updatePlayer();
-    statusText.textContent = "Đang đọc bằng ElevenLabs · DELF B2";
+    statusText.textContent = "Đang đọc bằng ElevenLabs · French";
     startAudioProgress();
   };
   audioPlayer.onended = () => {
@@ -614,8 +620,6 @@ function speakWithBrowser() {
   utterance.lang = "fr-FR";
   utterance.rate = speed;
   utterance.volume = volume;
-  const frenchVoice = selectFrenchVoice();
-  if (frenchVoice) utterance.voice = frenchVoice;
   utterance.onstart = () => {
     isSpeechLoading = false;
     playButton.disabled = false;
@@ -670,33 +674,6 @@ function clearAudioCache() {
     URL.revokeObjectURL(cachedAudioUrl);
     cachedAudioUrl = undefined;
   }
-}
-
-function selectFrenchVoice() {
-  const voices = speechSynthesis
-    .getVoices()
-    .filter((voice) => voice.lang.toLowerCase().startsWith("fr"));
-  const preferredNames = [
-    "denise",
-    "hortense",
-    "thomas",
-    "amelie",
-    "audrey",
-    "google français",
-    "google francais",
-  ];
-  return voices.sort((first, second) => {
-    const firstScore = preferredNames.findIndex((name) =>
-      first.name.toLowerCase().includes(name),
-    );
-    const secondScore = preferredNames.findIndex((name) =>
-      second.name.toLowerCase().includes(name),
-    );
-    return (
-      (secondScore < 0 ? preferredNames.length : secondScore) -
-      (firstScore < 0 ? preferredNames.length : firstScore)
-    );
-  })[0];
 }
 
 function startProgress() {
@@ -818,11 +795,6 @@ document.querySelector("#speedButtons").addEventListener("click", (event) => {
   if (isPlaying) speak();
   else renderSentence();
 });
-window.speechSynthesis?.addEventListener("voiceschanged", () => {
-  const french = selectFrenchVoice();
-  voiceStatus.textContent = french
-    ? `Đã sẵn sàng: ${french.name} · DELF B2`
-    : "Trình duyệt sẽ dùng giọng Pháp mặc định";
-});
+voiceStatus.textContent = "ElevenLabs API · giọng Pháp";
 updateList();
 renderSavedContents();

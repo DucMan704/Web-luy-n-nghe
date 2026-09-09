@@ -1,7 +1,6 @@
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Readable } from "node:stream";
 import { createServer } from "node:http";
 import { MongoClient, ObjectId } from "mongodb";
 import "dotenv/config";
@@ -75,6 +74,7 @@ async function handleCreateHistory(request, response) {
       title: title.trim().slice(0, 100),
       content: content.trim(),
       lineCount,
+      audioBySentence: {},
       savedAt: Date.now(),
     };
     const result = await savedContentsCollection.insertOne(savedContent);
@@ -105,12 +105,7 @@ async function handleDeleteHistory(request, response) {
 }
 
 function startKeepAlive() {
-  if (!keepAliveUrl) {
-    console.warn(
-      "Keep-alive chưa bật: hãy cấu hình KEEP_ALIVE_URL hoặc APP_URL.",
-    );
-    return;
-  }
+  if (!keepAliveUrl) return;
 
   setInterval(async () => {
     if (Date.now() - lastUserRequestAt < keepAliveInterval) return;
@@ -144,11 +139,45 @@ function readBody(request) {
 
 async function handleTextToSpeech(request, response) {
   try {
-    const { text } = JSON.parse(await readBody(request));
+    const { text, historyId, sentenceIndex } = JSON.parse(
+      await readBody(request),
+    );
 
     if (typeof text !== "string" || !text.trim()) {
       sendJson(response, 400, { error: "Text is required" });
       return;
+    }
+
+    const normalizedText = text.trim();
+    const hasSentenceReference =
+      typeof historyId === "string" &&
+      ObjectId.isValid(historyId) &&
+      Number.isInteger(sentenceIndex) &&
+      sentenceIndex >= 0;
+
+    if (hasSentenceReference) {
+      const savedContent = await savedContentsCollection.findOne(
+        { _id: new ObjectId(historyId) },
+        { projection: { content: 1, audioBySentence: 1 } },
+      );
+      const savedSentence = savedContent?.content
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)[sentenceIndex];
+      const cachedAudio = savedContent?.audioBySentence?.[sentenceIndex];
+
+      if (
+        savedSentence === normalizedText &&
+        cachedAudio?.contentType === "audio/mpeg" &&
+        cachedAudio.data
+      ) {
+        response.writeHead(200, {
+          "Content-Type": cachedAudio.contentType || "audio/mpeg",
+          "Cache-Control": "no-store",
+        });
+        response.end(cachedAudio.data.buffer ?? cachedAudio.data);
+        return;
+      }
     }
 
     if (!elevenLabsApiKey) {
@@ -162,32 +191,22 @@ async function handleTextToSpeech(request, response) {
       `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
       {
         method: "POST",
-
         headers: {
           "Content-Type": "application/json",
           "xi-api-key": elevenLabsApiKey,
         },
-
         body: JSON.stringify({
-          text: text.trim(),
-
-          // Model
-          model_id: "eleven_v3",
-
-          // Explicitly tell ElevenLabs that the text is French
+          text: normalizedText,
+          model_id: modelId,
           language_code: "fr",
-
-          // Natural French delivery
           voice_settings: {
             stability: 0.45,
             similarity_boost: 0.8,
             style: 0.0,
             use_speaker_boost: true,
           },
-
           output_format: "mp3_44100_128",
         }),
-
         signal: AbortSignal.timeout(15000),
       },
     );
@@ -195,16 +214,31 @@ async function handleTextToSpeech(request, response) {
     if (!elevenLabsResponse.ok) {
       const errorText = await elevenLabsResponse.text();
       console.error("ElevenLabs error:", errorText);
-
       throw new Error(`ElevenLabs HTTP ${elevenLabsResponse.status}`);
+    }
+
+    const audio = Buffer.from(await elevenLabsResponse.arrayBuffer());
+
+    if (hasSentenceReference) {
+      await savedContentsCollection.updateOne(
+        { _id: new ObjectId(historyId) },
+        {
+          $set: {
+            [`audioBySentence.${sentenceIndex}`]: {
+              text: normalizedText,
+              data: audio,
+              contentType: "audio/mpeg",
+            },
+          },
+        },
+      );
     }
 
     response.writeHead(200, {
       "Content-Type": "audio/mpeg",
       "Cache-Control": "no-store",
     });
-
-    Readable.fromWeb(elevenLabsResponse.body).pipe(response);
+    response.end(audio);
   } catch (error) {
     console.error("ElevenLabs TTS error:", error.message);
 

@@ -184,7 +184,9 @@ h1 em {
 .completion-card h2 {
   margin-bottom: 8px;
   color: var(--green);
-  font: 700 29px Fraunces, serif;
+  font:
+    700 29px Fraunces,
+    serif;
 }
 .completion-card p {
   margin: 0;
