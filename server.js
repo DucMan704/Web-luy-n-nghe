@@ -17,8 +17,11 @@ const elevenLabsApiKey = process.env.ELEVENLABS_API_KEY;
 const voiceId = "JBFqnCBsd6RMkjVDRZzb";
 const modelId = "eleven_v3";
 const edgeTtsVoice = process.env.EDGE_TTS_VOICE || "fr-FR-DeniseNeural";
-const edgeTtsPython =
-  process.env.EDGE_TTS_PYTHON || join(root, ".venv", "Scripts", "python.exe");
+const defaultEdgeTtsPython =
+  process.platform === "win32"
+    ? join(root, ".venv", "Scripts", "python.exe")
+    : "python3";
+const edgeTtsPython = process.env.EDGE_TTS_PYTHON || defaultEdgeTtsPython;
 const translationCache = new Map();
 const keepAliveUrl =
   process.env.KEEP_ALIVE_URL ||
@@ -266,8 +269,12 @@ async function handleTextToSpeech(request, response) {
         }
         audio = Buffer.from(await elevenLabsResponse.arrayBuffer());
       } catch (error) {
-        console.warn("ElevenLabs unavailable, using edge_tts:", error.message);
+        console.warn(
+          `ElevenLabs unavailable (${error.message}), using Edge TTS fallback`,
+        );
       }
+    } else {
+      console.warn("ELEVENLABS_API_KEY is missing, using Edge TTS fallback");
     }
 
     if (!audio) {
