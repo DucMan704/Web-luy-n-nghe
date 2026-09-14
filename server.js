@@ -1,7 +1,10 @@
 import { createReadStream, existsSync, statSync } from "node:fs";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
 import { MongoClient, ObjectId } from "mongodb";
 import "dotenv/config";
 
@@ -13,6 +16,9 @@ const port = Number(process.env.PORT || 3000);
 const elevenLabsApiKey = process.env.ELEVENLABS_API_KEY;
 const voiceId = "JBFqnCBsd6RMkjVDRZzb";
 const modelId = "eleven_v3";
+const edgeTtsVoice = process.env.EDGE_TTS_VOICE || "fr-FR-DeniseNeural";
+const edgeTtsPython =
+  process.env.EDGE_TTS_PYTHON || join(root, ".venv", "Scripts", "python.exe");
 const translationCache = new Map();
 const keepAliveUrl =
   process.env.KEEP_ALIVE_URL ||
@@ -137,6 +143,54 @@ function readBody(request) {
   });
 }
 
+function generateEdgeTtsAudio(text) {
+  return new Promise(async (resolve, reject) => {
+    let temporaryDirectory;
+    try {
+      temporaryDirectory = await mkdtemp(join(tmpdir(), "french-loop-"));
+      const outputPath = join(temporaryDirectory, "speech.mp3");
+      const child = spawn(
+        edgeTtsPython,
+        [
+          "-m",
+          "edge_tts",
+          "--voice",
+          edgeTtsVoice,
+          "--text",
+          text,
+          "--write-media",
+          outputPath,
+        ],
+        { windowsHide: true },
+      );
+      let errorOutput = "";
+      child.stderr.on("data", (chunk) => {
+        errorOutput += chunk.toString();
+      });
+      child.once("error", reject);
+      child.once("close", async (exitCode) => {
+        try {
+          if (exitCode !== 0) {
+            throw new Error(
+              `edge_tts exited with ${exitCode}: ${errorOutput.trim()}`,
+            );
+          }
+          resolve(await readFile(outputPath));
+        } catch (error) {
+          reject(error);
+        } finally {
+          await rm(temporaryDirectory, { recursive: true, force: true });
+        }
+      });
+    } catch (error) {
+      if (temporaryDirectory) {
+        await rm(temporaryDirectory, { recursive: true, force: true });
+      }
+      reject(error);
+    }
+  });
+}
+
 async function handleTextToSpeech(request, response) {
   try {
     const { text, historyId, sentenceIndex } = JSON.parse(
@@ -180,44 +234,45 @@ async function handleTextToSpeech(request, response) {
       }
     }
 
-    if (!elevenLabsApiKey) {
-      sendJson(response, 500, {
-        error: "ELEVENLABS_API_KEY is missing",
-      });
-      return;
-    }
-
-    const elevenLabsResponse = await fetch(
-      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "xi-api-key": elevenLabsApiKey,
-        },
-        body: JSON.stringify({
-          text: normalizedText,
-          model_id: modelId,
-          language_code: "fr",
-          voice_settings: {
-            stability: 0.45,
-            similarity_boost: 0.8,
-            style: 0.0,
-            use_speaker_boost: true,
+    let audio;
+    if (elevenLabsApiKey) {
+      try {
+        const elevenLabsResponse = await fetch(
+          `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "xi-api-key": elevenLabsApiKey,
+            },
+            body: JSON.stringify({
+              text: normalizedText,
+              model_id: modelId,
+              language_code: "fr",
+              voice_settings: {
+                stability: 0.45,
+                similarity_boost: 0.8,
+                style: 0.0,
+                use_speaker_boost: true,
+              },
+              output_format: "mp3_44100_128",
+            }),
+            signal: AbortSignal.timeout(15000),
           },
-          output_format: "mp3_44100_128",
-        }),
-        signal: AbortSignal.timeout(15000),
-      },
-    );
+        );
 
-    if (!elevenLabsResponse.ok) {
-      const errorText = await elevenLabsResponse.text();
-      console.error("ElevenLabs error:", errorText);
-      throw new Error(`ElevenLabs HTTP ${elevenLabsResponse.status}`);
+        if (!elevenLabsResponse.ok) {
+          throw new Error(`ElevenLabs HTTP ${elevenLabsResponse.status}`);
+        }
+        audio = Buffer.from(await elevenLabsResponse.arrayBuffer());
+      } catch (error) {
+        console.warn("ElevenLabs unavailable, using edge_tts:", error.message);
+      }
     }
 
-    const audio = Buffer.from(await elevenLabsResponse.arrayBuffer());
+    if (!audio) {
+      audio = await generateEdgeTtsAudio(normalizedText);
+    }
 
     if (hasSentenceReference) {
       await savedContentsCollection.updateOne(
@@ -240,7 +295,7 @@ async function handleTextToSpeech(request, response) {
     });
     response.end(audio);
   } catch (error) {
-    console.error("ElevenLabs TTS error:", error.message);
+    console.error("TTS error:", error.message);
 
     sendJson(response, 502, {
       error: "Unable to generate French audio",

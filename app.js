@@ -545,11 +545,11 @@ function speak() {
   isSpeechLoading = true;
   playButton.disabled = true;
   window.speechSynthesis.cancel();
-  speakWithElevenLabs(requestId)
+  speakWithApi(requestId)
     .catch(() => {
       if (requestId !== speechRequestId) return;
       voiceStatus.textContent =
-        "ElevenLabs không khả dụng · dùng giọng trình duyệt";
+        "API và Edge TTS không khả dụng · dùng giọng trình duyệt";
       speakWithBrowser();
     })
     .finally(() => {
@@ -560,8 +560,8 @@ function speak() {
     });
 }
 
-async function speakWithElevenLabs(requestId) {
-  statusText.textContent = "Đang tải giọng đọc ElevenLabs…";
+async function speakWithApi(requestId) {
+  statusText.textContent = "Đang tải giọng đọc…";
   const sentence = sentences[currentIndex];
   if (!cachedAudioUrl) {
     const response = await fetch("/api/tts", {
@@ -573,7 +573,7 @@ async function speakWithElevenLabs(requestId) {
         sentenceIndex: currentIndex,
       }),
     });
-    if (!response.ok) throw new Error(`ElevenLabs HTTP ${response.status}`);
+    if (!response.ok) throw new Error(`TTS HTTP ${response.status}`);
     const blob = await response.blob();
     if (requestId !== speechRequestId) return;
     cachedAudioUrl = URL.createObjectURL(blob);
@@ -591,7 +591,7 @@ async function speakWithElevenLabs(requestId) {
     playButton.disabled = false;
     isPlaying = true;
     updatePlayer();
-    statusText.textContent = "Đang đọc bằng ElevenLabs · French";
+    statusText.textContent = "Đang đọc bằng Edge TTS · French";
     startAudioProgress();
   };
   audioPlayer.onended = () => {
